@@ -1,504 +1,304 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚡ Smart Support - AI Ticket System</title>
+// Import Transformers.js
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.6/dist/transformers.min.js";
+
+// Google Sheets URL (ЗАМЕНИТЕ НА ВАШ ПОСЛЕ ДЕПЛОЯ)
+const SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxCLYXXKEckO5dWLMe3Ctyed8OGVWxW8FQkIw4UPoG-NWS-LjYpf105uUoHXJroflzS/exec';
+
+let reviews = [];
+let model = null;
+
+const el = {
+    status: document.getElementById('statusMessage'),
+    error: document.getElementById('errorMessage'),
+    btn: document.getElementById('analyzeButton'),
+    review: document.getElementById('reviewText'),
+    result: document.getElementById('resultBox'),
+    icon: document.getElementById('resultIcon'),
+    label: document.getElementById('resultLabel'),
+    conf: document.getElementById('resultConfidence'),
+    confidenceFill: document.getElementById('confidenceFill'),
+    loading: document.getElementById('loadingSpinner'),
+    // Ticket elements
+    ticketBox: document.getElementById('ticketBox'),
+    ticketTitle: document.getElementById('ticketTitle'),
+    ticketSubtitle: document.getElementById('ticketSubtitle'),
+    ticketBadge: document.getElementById('ticketBadge'),
+    ticketMessage: document.getElementById('ticketMessage'),
+    ticketActionBtn: document.getElementById('ticketActionBtn'),
+    ticketSecondaryBtn: document.getElementById('ticketSecondaryBtn'),
+    ticketId: document.getElementById('ticketId'),
+    ticketTimestamp: document.getElementById('ticketTimestamp')
+};
+
+function setStatus(text) {
+    el.status.textContent = text;
+}
+
+function showError(text) {
+    el.error.style.display = 'block';
+    el.error.querySelector('span').textContent = text;
+}
+
+function hideError() {
+    el.error.style.display = 'none';
+}
+
+function generateTicketId() {
+    return 'TKT_' + Date.now().toString(36).toUpperCase() + '_' + Math.random().toString(36).substring(2, 5).toUpperCase();
+}
+
+async function loadReviews() {
+    const res = await fetch('reviews_test.tsv');
+    const text = await res.text();
     
-    <!-- Font Awesome -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    return new Promise((resolve, reject) => {
+        Papa.parse(text, {
+            header: true,
+            delimiter: '\t',
+            complete: (r) => {
+                const data = r.data.map(row => row.text).filter(t => t && t.trim());
+                if (data.length === 0) reject(new Error('No reviews'));
+                else resolve(data);
+            },
+            error: (e) => reject(e)
+        });
+    });
+}
+
+async function initModel() {
+    setStatus('Loading AI model...');
+    model = await pipeline('text-classification', 'Xenova/distilbert-base-uncased-finetuned-sst-2-english');
+    setStatus('System ready');
+    el.btn.disabled = false;
+}
+
+function getRandom() {
+    return reviews[Math.floor(Math.random() * reviews.length)];
+}
+
+async function classify(text) {
+    const result = await model(text);
+    return result[0];
+}
+
+function mapSentiment(result) {
+    const { label, score } = result;
     
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    if (label === 'POSITIVE' && score > 0.5) {
+        return { type: 'positive', text: 'POSITIVE', score, icon: '😊' };
+    } else if (label === 'NEGATIVE' && score > 0.5) {
+        return { type: 'negative', text: 'NEGATIVE', score, icon: '😠' };
+    } else {
+        return { type: 'neutral', text: 'NEUTRAL', score, icon: '😐' };
+    }
+}
+
+function showResult(data) {
+    el.result.style.display = 'block';
+    el.icon.textContent = data.icon;
+    el.label.textContent = data.text;
+    el.confidenceFill.style.width = `${data.score * 100}%`;
+    el.conf.textContent = `${(data.score * 100).toFixed(1)}% confidence`;
+}
+
+/**
+ * НОВАЯ ФУНКЦИЯ: Создает тикет в поддержку на основе отзыва
+ */
+function createSupportTicket(confidence, label, review) {
+    let normalizedScore = 0.5;
     
-    <!-- Papa Parse -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    if (label === "POSITIVE") {
+        normalizedScore = confidence;
+    } else if (label === "NEGATIVE") {
+        normalizedScore = 1.0 - confidence;
+    }
     
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    const ticketId = generateTicketId();
+    const now = new Date();
+    const timestamp = now.toLocaleString();
+    
+    if (normalizedScore <= 0.4) {
+        // CRITICAL - Негативный отзыв, срочный тикет
+        return {
+            priority: 'critical',
+            title: '🚨 CRITICAL SUPPORT TICKET',
+            subtitle: 'Priority 1 - Immediate attention required',
+            badge: 'P1 CRITICAL',
+            message: `Customer is extremely dissatisfied. Review: "${review.substring(0, 100)}${review.length > 100 ? '...' : ''}"`,
+            actionBtn: {
+                text: '🔔 Assign to Senior Support',
+                icon: 'fa-bolt',
+                action: () => { alert('🚨 Ticket escalated to senior support team. They will contact customer within 15 minutes.'); }
+            },
+            secondaryBtn: {
+                text: 'Call Customer Now',
+                action: () => { alert('📞 Initiating call to customer... (Demo)'); }
+            },
+            actionCode: 'PRIORITY_1_TICKET',
+            priorityLevel: 'CRITICAL'
+        };
+    } else if (normalizedScore < 0.7) {
+        // MEDIUM - Нейтральный отзыв, обычный тикет
+        return {
+            priority: 'medium',
+            title: '📋 FEEDBACK TICKET',
+            subtitle: 'Standard priority - Review requested',
+            badge: 'P3 MEDIUM',
+            message: `Customer needs follow-up. Review: "${review.substring(0, 100)}${review.length > 100 ? '...' : ''}"`,
+            actionBtn: {
+                text: '✉️ Send Feedback Form',
+                icon: 'fa-envelope',
+                action: () => { alert('📨 Feedback form sent to customer email.'); }
+            },
+            secondaryBtn: {
+                text: 'Add to CRM',
+                action: () => { alert('✅ Customer added to CRM for follow-up.'); }
+            },
+            actionCode: 'FEEDBACK_TICKET',
+            priorityLevel: 'MEDIUM'
+        };
+    } else {
+        // LOW - Позитивный отзыв, лояльность
+        return {
+            priority: 'low',
+            title: '⭐ LOYALTY PROGRAM',
+            subtitle: 'VIP customer - Add to rewards',
+            badge: 'P5 LOW',
+            message: `Happy customer! Review: "${review.substring(0, 100)}${review.length > 100 ? '...' : ''}"`,
+            actionBtn: {
+                text: '🎁 Add to Loyalty Program',
+                icon: 'fa-gift',
+                action: () => { alert('✨ Customer added to VIP loyalty program! Bonus points awarded.'); }
+            },
+            secondaryBtn: {
+                text: 'Send Thank You',
+                action: () => { alert('💌 Thank you email sent with 10% discount code.'); }
+            },
+            actionCode: 'LOYALTY_TICKET',
+            priorityLevel: 'LOW'
+        };
+    }
+}
 
-        body {
-            font-family: 'Inter', sans-serif;
-            background: #f8fafc;
-            min-height: 100vh;
-            padding: 40px 20px;
-            color: #1e293b;
-        }
+/**
+ * НОВАЯ ФУНКЦИЯ: Отображает тикет в интерфейсе
+ */
+function showTicket(ticketData, ticketId) {
+    // Устанавливаем класс приоритета
+    el.ticketBox.className = 'ticket-box priority-' + ticketData.priority;
+    el.ticketBox.style.display = 'block';
+    
+    // Заполняем данные
+    el.ticketTitle.textContent = ticketData.title;
+    el.ticketSubtitle.textContent = ticketData.subtitle;
+    el.ticketBadge.textContent = ticketData.badge;
+    el.ticketMessage.textContent = ticketData.message;
+    
+    // Настраиваем кнопки
+    const actionBtn = el.ticketActionBtn;
+    actionBtn.innerHTML = `<i class="fas ${ticketData.actionBtn.icon}"></i> ${ticketData.actionBtn.text}`;
+    
+    // Удаляем старые обработчики и добавляем новые
+    const newActionBtn = actionBtn.cloneNode(true);
+    actionBtn.parentNode.replaceChild(newActionBtn, actionBtn);
+    el.ticketActionBtn = newActionBtn;
+    
+    el.ticketActionBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        ticketData.actionBtn.action();
+    });
+    
+    el.ticketSecondaryBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        ticketData.secondaryBtn.action();
+    });
+    
+    // Ticket metadata
+    el.ticketId.textContent = ticketId;
+    el.ticketTimestamp.textContent = new Date().toLocaleString();
+}
 
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
+async function sendToSheets(review, sentiment, confidence, actionCode, priority, ticketId) {
+    try {
+        const payload = {
+            ts_iso: new Date().toISOString(),
+            event: 'ticket_created',
+            variant: 'SUPPORT',
+            userId: `user-${Date.now()}`,
+            meta: JSON.stringify({ 
+                url: window.location.href,
+                userAgent: navigator.userAgent,
+                ticket_generated: true
+            }),
+            review: review,
+            sentiment_label: sentiment,
+            sentiment_confidence: confidence,
+            action_taken: actionCode,
+            priority: priority,
+            ticket_id: ticketId
+        };
+        
+        await fetch(SHEETS_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        
+        console.log('📊 Ticket logged to Sheets:', payload);
+    } catch (e) {
+        console.error('Sheets error:', e);
+    }
+}
 
-        /* Header */
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
+async function analyze() {
+    try {
+        hideError();
+        
+        el.btn.disabled = true;
+        el.loading.style.display = 'block';
+        el.result.style.display = 'none';
+        el.ticketBox.style.display = 'none';
+        
+        const review = getRandom();
+        el.review.textContent = review;
+        
+        const result = await classify(review);
+        const sentiment = mapSentiment(result);
+        
+        showResult(sentiment);
+        
+        // СОЗДАЕМ ТИКЕТ НА ОСНОВЕ ОТЗЫВА
+        const ticketId = generateTicketId();
+        const ticketData = createSupportTicket(result.score, result.label, review);
+        showTicket(ticketData, ticketId);
+        
+        // Отправляем в Google Sheets
+        await sendToSheets(
+            review,
+            sentiment.text,
+            sentiment.score,
+            ticketData.actionCode,
+            ticketData.priorityLevel,
+            ticketId
+        );
+        
+    } catch (e) {
+        showError(e.message);
+    } finally {
+        el.btn.disabled = false;
+        el.loading.style.display = 'none';
+    }
+}
 
-        h1 {
-            font-size: 2.5rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 10px;
-        }
+async function init() {
+    try {
+        reviews = await loadReviews();
+        await initModel();
+    } catch (e) {
+        showError(e.message);
+    }
+}
 
-        .subtitle {
-            color: #64748b;
-            font-size: 1.1rem;
-        }
-
-        /* Status Bar */
-        .status-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: white;
-            padding: 15px 25px;
-            border-radius: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            margin-bottom: 25px;
-        }
-
-        .status {
-            color: #64748b;
-            font-size: 0.95rem;
-        }
-
-        .status i {
-            margin-right: 8px;
-            color: #667eea;
-        }
-
-        .badge {
-            background: #e2e8f0;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            color: #475569;
-        }
-
-        /* Error Message */
-        .error {
-            display: none;
-            background: #fee2e2;
-            border: 1px solid #fecaca;
-            color: #dc2626;
-            padding: 15px 20px;
-            border-radius: 10px;
-            margin-bottom: 25px;
-            font-size: 0.95rem;
-        }
-
-        .error i {
-            margin-right: 8px;
-        }
-
-        /* Main Card */
-        .card {
-            background: white;
-            border-radius: 24px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
-            overflow: hidden;
-        }
-
-        .card-header {
-            padding: 25px 30px;
-            border-bottom: 1px solid #e2e8f0;
-            background: #f8fafc;
-        }
-
-        .card-header h2 {
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: #1e293b;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .card-header h2 i {
-            color: #667eea;
-        }
-
-        .card-body {
-            padding: 30px;
-        }
-
-        /* Analyze Button */
-        .analyze-btn {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 14px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 25px;
-        }
-
-        .analyze-btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(102, 126, 234, 0.4);
-        }
-
-        .analyze-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        /* Loading */
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 30px;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #e2e8f0;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        /* Review Box */
-        .review-container {
-            background: #f8fafc;
-            border-radius: 16px;
-            padding: 25px;
-            margin-bottom: 25px;
-            border: 1px solid #e2e8f0;
-        }
-
-        .review-label {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #64748b;
-            margin-bottom: 10px;
-        }
-
-        #reviewText {
-            font-size: 1.1rem;
-            line-height: 1.6;
-            color: #1e293b;
-            min-height: 80px;
-        }
-
-        #reviewText:empty:before {
-            content: "Click analyze to read a customer review...";
-            color: #94a3b8;
-            font-style: italic;
-        }
-
-        /* Sentiment Result */
-        .sentiment-result {
-            background: #f8fafc;
-            border-radius: 16px;
-            padding: 25px;
-            margin-bottom: 25px;
-            border: 1px solid #e2e8f0;
-            display: none;
-        }
-
-        .sentiment-header {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-
-        #resultIcon {
-            font-size: 40px;
-        }
-
-        #resultLabel {
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-
-        .confidence-bar {
-            width: 100%;
-            height: 8px;
-            background: #e2e8f0;
-            border-radius: 4px;
-            margin-top: 15px;
-            overflow: hidden;
-        }
-
-        .confidence-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            border-radius: 4px;
-            transition: width 0.5s ease;
-        }
-
-        #resultConfidence {
-            margin-top: 10px;
-            font-size: 0.9rem;
-            color: #64748b;
-        }
-
-        /* Action Box - Ticket System */
-        .ticket-box {
-            display: none;
-            border-radius: 16px;
-            overflow: hidden;
-            border: 1px solid;
-            margin-top: 25px;
-        }
-
-        .ticket-header {
-            padding: 20px 25px;
-            background: white;
-            border-bottom: 1px solid #e2e8f0;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .priority-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-
-        .ticket-title {
-            flex: 1;
-        }
-
-        .ticket-title h3 {
-            font-size: 1.2rem;
-            font-weight: 700;
-            margin-bottom: 4px;
-        }
-
-        .ticket-title p {
-            font-size: 0.9rem;
-            color: #64748b;
-        }
-
-        .priority-badge {
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            text-transform: uppercase;
-        }
-
-        .ticket-body {
-            padding: 25px;
-            background: #f8fafc;
-        }
-
-        .ticket-message {
-            font-size: 1.1rem;
-            font-weight: 500;
-            margin-bottom: 20px;
-            line-height: 1.5;
-        }
-
-        .ticket-actions {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .ticket-btn {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 10px;
-            font-weight: 600;
-            font-size: 0.95rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            background: white;
-            border: 1px solid #e2e8f0;
-            color: #1e293b;
-            flex: 1;
-            justify-content: center;
-        }
-
-        .ticket-btn.primary {
-            background: #667eea;
-            color: white;
-            border: none;
-        }
-
-        .ticket-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-        }
-
-        .ticket-footer {
-            padding: 15px 25px;
-            background: white;
-            border-top: 1px solid #e2e8f0;
-            font-size: 0.85rem;
-            color: #64748b;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .ticket-id {
-            font-family: monospace;
-            background: #f1f5f9;
-            padding: 4px 8px;
-            border-radius: 6px;
-        }
-
-        /* Priority Colors */
-        .priority-critical { border-color: #ef4444; }
-        .priority-critical .priority-icon { background: #fee2e2; color: #ef4444; }
-        .priority-critical .priority-badge { background: #ef4444; color: white; }
-
-        .priority-medium { border-color: #f59e0b; }
-        .priority-medium .priority-icon { background: #fef3c7; color: #f59e0b; }
-        .priority-medium .priority-badge { background: #f59e0b; color: white; }
-
-        .priority-low { border-color: #10b981; }
-        .priority-low .priority-icon { background: #d1fae5; color: #10b981; }
-        .priority-low .priority-badge { background: #10b981; color: white; }
-
-        /* Footer */
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #94a3b8;
-            font-size: 0.9rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>⚡ Smart Support System</h1>
-            <div class="subtitle">AI-powered customer service automation</div>
-        </div>
-
-        <div class="status-bar">
-            <div class="status">
-                <i class="fas fa-circle" style="color: #10b981;"></i>
-                <span id="statusMessage">Initializing system...</span>
-            </div>
-            <div class="badge">
-                <i class="fas fa-ticket-alt"></i> Auto-ticketing
-            </div>
-        </div>
-
-        <div id="errorMessage" class="error">
-            <i class="fas fa-exclamation-triangle"></i>
-            <span></span>
-        </div>
-
-        <div class="card">
-            <div class="card-header">
-                <h2>
-                    <i class="fas fa-robot"></i>
-                    Customer Review Analyzer
-                </h2>
-            </div>
-            
-            <div class="card-body">
-                <button id="analyzeButton" class="analyze-btn" disabled>
-                    <i class="fas fa-magic"></i>
-                    Analyze Next Review
-                </button>
-
-                <div id="loadingSpinner" class="loading">
-                    <div class="spinner"></div>
-                    <div style="color: #64748b;">Analyzing sentiment...</div>
-                </div>
-
-                <div class="review-container">
-                    <div class="review-label">
-                        <i class="far fa-comment"></i> CUSTOMER REVIEW
-                    </div>
-                    <div id="reviewText"></div>
-                </div>
-
-                <div id="resultBox" class="sentiment-result">
-                    <div class="sentiment-header">
-                        <div id="resultIcon"></div>
-                        <div id="resultLabel"></div>
-                    </div>
-                    <div class="confidence-bar">
-                        <div id="confidenceFill" class="confidence-fill" style="width: 0%"></div>
-                    </div>
-                    <div id="resultConfidence"></div>
-                </div>
-
-                <!-- Ticket System Result -->
-                <div id="ticketBox" class="ticket-box">
-                    <div class="ticket-header">
-                        <div class="priority-icon">
-                            <i class="fas fa-ticket-alt"></i>
-                        </div>
-                        <div class="ticket-title">
-                            <h3 id="ticketTitle">Support Ticket</h3>
-                            <p id="ticketSubtitle"></p>
-                        </div>
-                        <div id="ticketBadge" class="priority-badge"></div>
-                    </div>
-                    
-                    <div class="ticket-body">
-                        <div id="ticketMessage" class="ticket-message"></div>
-                        <div class="ticket-actions">
-                            <button id="ticketActionBtn" class="ticket-btn primary">
-                                <i class="fas fa-bolt"></i>
-                                <span></span>
-                            </button>
-                            <button id="ticketSecondaryBtn" class="ticket-btn">
-                                <i class="far fa-clock"></i>
-                                Remind Later
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="ticket-footer">
-                        <i class="fas fa-hashtag"></i>
-                        <span class="ticket-id" id="ticketId">TICKET_GEN_123</span>
-                        <span style="flex: 1; text-align: right;" id="ticketTimestamp"></span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="footer">
-            <i class="fas fa-shield-alt"></i> Automated support system • Priority based on sentiment
-        </div>
-    </div>
-
-    <script type="module" src="app.js"></script>
-</body>
-</html>
+el.btn.addEventListener('click', analyze);
+document.addEventListener('DOMContentLoaded', init);
