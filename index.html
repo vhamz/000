@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎵 Sentiment DJ - Music for Your Mood</title>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Papa Parse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Space Grotesk', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: white;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 3rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-align: center;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+            letter-spacing: -0.02em;
+        }
+
+        .subtitle {
+            text-align: center;
+            font-size: 1.2rem;
+            margin-bottom: 40px;
+            opacity: 0.9;
+            font-weight: 300;
+        }
+
+        .glass-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        .status {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            font-size: 14px;
+            text-align: center;
+            background: rgba(255,255,255,0.2);
+        }
+
+        .error {
+            display: none;
+            padding: 15px;
+            margin-bottom: 20px;
+            background: rgba(255, 99, 99, 0.3);
+            border: 1px solid #ff6b6b;
+            color: white;
+            border-radius: 12px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .analyze-btn {
+            width: 100%;
+            padding: 18px;
+            background: white;
+            color: #667eea;
+            border: none;
+            border-radius: 50px;
+            font-size: 1.2rem;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .analyze-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .analyze-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 30px;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .review-box {
+            padding: 25px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 16px;
+            margin-bottom: 25px;
+            min-height: 120px;
+            font-size: 1.1rem;
+            line-height: 1.6;
+            border: 1px solid rgba(255,255,255,0.2);
+            font-style: italic;
+        }
+
+        .review-box:empty:before {
+            content: "🎧 Click the button above to analyze your mood...";
+            color: rgba(255,255,255,0.7);
+        }
+
+        .result {
+            display: none;
+            text-align: center;
+            padding: 25px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 16px;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+
+        .result-icon {
+            font-size: 64px;
+            margin-bottom: 15px;
+        }
+
+        .result-label {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+
+        .result-confidence {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        /* Стили для музыкального плеера */
+        .music-box {
+            display: none;
+            margin-top: 25px;
+            padding: 25px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 16px;
+            text-align: center;
+            border: 2px solid;
+            animation: fadeIn 0.5s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .music-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .music-message {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+
+        .music-player {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .music-player iframe {
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+
+        .music-button {
+            padding: 12px 30px;
+            background: #1DB954;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .music-button:hover {
+            transform: scale(1.05);
+            background: #1ed760;
+        }
+
+        .footer-note {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎵 Sentiment DJ</h1>
+        <div class="subtitle">Tell us how you feel, we'll play the perfect song</div>
+
+        <div class="glass-card">
+            <div id="statusMessage" class="status">Initializing...</div>
+            <div id="errorMessage" class="error"></div>
+
+            <button id="analyzeButton" class="analyze-btn" disabled>
+                <i class="fas fa-magic"></i> Analyze My Mood
+            </button>
+
+            <div id="loadingSpinner" class="loading">
+                <div class="spinner"></div>
+                <div>DJ is reading your mind...</div>
+            </div>
+
+            <div id="reviewText" class="review-box"></div>
+
+            <div id="resultBox" class="result">
+                <div id="resultIcon" class="result-icon"></div>
+                <div id="resultLabel" class="result-label"></div>
+                <div id="resultConfidence" class="result-confidence"></div>
+            </div>
+
+            <!-- НОВЫЙ БЛОК: Музыкальный плеер -->
+            <div id="musicBox" class="music-box">
+                <div id="musicIcon" class="music-icon">🎧</div>
+                <div id="musicMessage" class="music-message"></div>
+                <div id="musicPlayer" class="music-player">
+                    <!-- Сюда будет вставлен iframe Spotify -->
+                </div>
+                <a id="musicButton" class="music-button" href="#" target="_blank">
+                    <i class="fab fa-spotify"></i> Listen on Spotify
+                </a>
+            </div>
+        </div>
+        
+        <div class="footer-note">
+            <i class="fas fa-headphones"></i> We recommend a song based on your sentiment
+        </div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
